@@ -4,6 +4,7 @@ import os
 import time
 from dotenv import load_dotenv
 import requests
+import json
 
 ### PostgreSQL adapter for Python
 import psycopg
@@ -15,7 +16,7 @@ from PyPDF2 import PdfReader
 load_dotenv()
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data")
 CHUNK_SIZE = 2048
-EMBEDDINGS_API_URL = "https://api-inference.huggingface.co/models/BAAI/bge-small-en-v1.5"
+EMBEDDINGS_API_URL = "https://api-inference.huggingface.co/models/BAAI/bge-small-en-v1.5/pipeline/feature-extraction"
 MODEL_API_URL = "https://api-inference.huggingface.co/models/deepset/roberta-base-squad2"
 hf_api_key = os.environ.get("HF_API_KEY")
 HEADERS = {
@@ -50,6 +51,10 @@ def get_answer(payload):
     )
     return response.json()
 
+def get_hf_json(payload):
+    return {
+        "inputs": payload
+    }
 
 ### PostgreSQL database url and connection
 database_url = os.environ.get(
@@ -81,10 +86,11 @@ if not args.skip_embedding_step:
 
         for chunk in split_string_by_length(content, CHUNK_SIZE):
             print(f"Creating embedding for chunk: {chunk[0:20]}...")
-            
+
+            embedding = get_embedding(get_hf_json(chunk))
             db.execute(
                 "INSERT INTO chunks (embedding, chunk) VALUES (%s, %s)",
-                [str(get_embedding(chunk)), chunk],
+                [str(embedding), chunk],
             )
 
         print(f"\nTotal index time: {time.perf_counter() - tic}ms")
@@ -95,7 +101,7 @@ question = input("\nEnter question: ")
 # Create embedding from question.  Many RAG applications use a query rewriter before querying
 # the vector database.  For more information on query rewriting, see this whitepaper:
 #    https://arxiv.org/abs/2305.14283
-question_embedding = get_embedding(question)
+question_embedding = get_embedding(get_hf_json(question))
 
 result = db.execute(
     "SELECT (embedding <=> %s::vector)*100 as score, chunk FROM chunks ORDER BY score DESC LIMIT 5", 
